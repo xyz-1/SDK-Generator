@@ -69,7 +69,7 @@ std::string GenerateFileName(const FileContentType type, const Package& package)
 {
 	extern IGenerator* generator;
 
-	const char* name;
+	const char* name = 0;
 	switch (type)
 	{
 	case FileContentType::Structs:

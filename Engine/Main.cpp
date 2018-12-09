@@ -2,6 +2,7 @@
 // by KN4CK3R
 // https://www.oldschoolhack.me
 
+#define NOMINMAX
 #include <windows.h>
 
 #include <fstream>
