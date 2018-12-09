@@ -28,7 +28,7 @@ bool ComparePropertyLess(const UEProperty& lhs, const UEProperty& rhs)
 	{
 		return lhs.Cast<UEBoolProperty>() < rhs.Cast<UEBoolProperty>();
 	}
-	
+
 	return lhs.GetOffset() < rhs.GetOffset();
 }
 
@@ -84,8 +84,6 @@ bool Package::Save(const fs::path& path) const
 
 		return true;
 	}
-	
-	Logger::Log("skip empty Package: %s", packageObj.GetName());
 
 	return false;
 }
@@ -413,7 +411,7 @@ void Package::GenerateClass(const UEClass& classObj)
 	}
 
 	generator->GetPredefinedClassMethods(c.FullName, c.PredefinedMethods);
-	
+
 	if (generator->ShouldUseStrings())
 	{
 		c.PredefinedMethods.push_back(IGenerator::PredefinedMethod::Inline(tfm::format(R"(	static UClass* StaticClass()
@@ -679,7 +677,7 @@ void Package::GenerateMethods(const UEClass& classObj, std::vector<Method>& meth
 					parameters.emplace_back(std::make_pair(prop, std::move(p)));
 				}
 			}
-			
+
 			std::sort(std::begin(parameters), std::end(parameters), [](auto&& lhs, auto&& rhs) { return ComparePropertyLess(lhs.first, rhs.first); });
 
 			for (auto& param : parameters)
@@ -787,7 +785,7 @@ void Package::SaveFunctions(const fs::path& path) const
 				os << m.Body << "\n\n";
 			}
 		}
-		
+
 		for (auto&& m : c.Methods)
 		{
 			//Method Info
@@ -904,7 +902,7 @@ void Package::PrintStruct(std::ostream& os, const ScriptStruct& ss) const
 void Package::PrintClass(std::ostream& os, const Class& c) const
 {
 	using namespace cpplinq;
-	
+
 	os << "// " << c.FullName << "\n// ";
 	if (c.InheritedSize)
 	{

@@ -76,7 +76,7 @@ void SaveSDKHeader(const fs::path& path, const std::unordered_map<UEObject, bool
 			includes.insert(includes.end(), std::begin(generatorIncludes), std::end(generatorIncludes));
 
 			PrintFileHeader(os2, includes, true);
-			
+
 			os2 << generator->GetBasicDeclarations() << "\n";
 
 			PrintFileFooter(os2);
@@ -86,7 +86,7 @@ void SaveSDKHeader(const fs::path& path, const std::unordered_map<UEObject, bool
 		{
 			std::ofstream os2(path / "SDK" / tfm::format("%s_Basic.cpp", generator->GetGameNameShort()));
 
-			PrintFileHeader(os2, { "../SDK.hpp" }, false);
+			PrintFileHeader(os2, { tfm::format("%s_CoreUObject_classes.hpp", generator->GetGameNameShort()) }, false);
 
 			os2 << generator->GetBasicDefinitions() << "\n";
 
@@ -136,7 +136,7 @@ void ProcessPackages(const fs::path& path)
 
 	const auto sdkPath = path / "SDK";
 	fs::create_directories(sdkPath);
-	
+
 	std::vector<Package> packages;
 
 	std::unordered_map<UEObject, bool> processedObjects;
@@ -195,7 +195,7 @@ DWORD WINAPI OnAttach(LPVOID lpParameter)
 
 	outputDirectory /= generator->GetGameNameShort();
 	fs::create_directories(outputDirectory);
-	
+
 	std::ofstream log(outputDirectory / "Generator.log");
 	Logger::SetStream(&log);
 
