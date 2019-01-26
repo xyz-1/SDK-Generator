@@ -4,68 +4,49 @@
 class FNameEntry
 {
 public:
-	int32_t Index;
-	int32_t Flags;
+	int Index;
 	FNameEntry* HashNext;
-
-	union
-	{
-		char AnsiName[1024];
-		wchar_t WideName[1024];
-	};
-
-	const char* GetName() const
-	{
-		return AnsiName;
-	}
+	char AnsiName[1024];
 };
 
-template<typename ElementType, int32_t MaxTotalElements, int32_t ElementsPerChunk>
-class TStaticIndirectArrayThreadSafeRead
+class TNameEntryArray
 {
 public:
-	int32_t Num() const
+	enum
 	{
-		return numElements;
+		ElementsPerChunk = 16 * 1024,
+		ChunkTableSize = (2 * 1024 * 1024 + ElementsPerChunk - 1) / ElementsPerChunk
+	};
+
+	bool IsValidIndex(int Index)
+	{
+		return Index >= 0 && Index < NumElements && GetById(Index);
 	}
 
-	bool IsValidIndex(int32_t index) const
+	FNameEntry*& GetById(int Index)
 	{
-		return index >= 0 && index < Num() && GetById(index) != nullptr;
+		return *GetItemPtr(Index);
 	}
 
-	ElementType const* const& GetById(int32_t index) const
+	FNameEntry** GetItemPtr(int Index)
 	{
-		return *GetItemPtr(index);
-	}
-
-private:
-	ElementType const* const* GetItemPtr(int32_t Index) const
-	{
-		const int32_t ChunkIndex = Index / ElementsPerChunk;
-		const int32_t WithinChunkIndex = Index % ElementsPerChunk;
-		const auto Chunk = chunks[ChunkIndex];
+		auto ChunkIndex = Index / ElementsPerChunk;
+		auto WithinChunkIndex = Index % ElementsPerChunk;
+		auto Chunk = Chunks[ChunkIndex];
 		return Chunk + WithinChunkIndex;
 	}
 
-	enum
-	{
-		ChunkTableSize = (MaxTotalElements + ElementsPerChunk - 1) / ElementsPerChunk
-	};
-
-	ElementType** chunks[ChunkTableSize];
-	int32_t numElements;
-	int32_t numChunks;
+	FNameEntry** Chunks[ChunkTableSize];
+	int NumElements;
+	int NumChunks;
 };
 
-using TNameEntryArray = TStaticIndirectArrayThreadSafeRead<FNameEntry, 2 * 1024 * 1024, 16384>;
-
-TNameEntryArray* GlobalNames = nullptr;
+TNameEntryArray* GlobalNames;
 
 bool NamesStore::Initialize()
 {
-	const auto address = FindPattern(GetModuleHandleW(nullptr), reinterpret_cast<const unsigned char*>("\x48\x89\x1D\x00\x00\x00\x00\x8B\xC3\x48"), "xxx????xxx");
-	GlobalNames = reinterpret_cast<decltype(GlobalNames)>(*reinterpret_cast<uintptr_t*>(address + 7 + *reinterpret_cast<uint32_t*>(address + 3)));
+	auto Address = FindPattern(GetModuleHandleW(0), (unsigned char*)"\x48\x89\x1D\x00\x00\x00\x00\x8B\xC3", "xxx????xx");
+	GlobalNames = *(TNameEntryArray**)(Address + *(DWORD*)(Address + 0x3) + 0x7);
 
 	return true;
 }
@@ -77,15 +58,15 @@ void* NamesStore::GetAddress()
 
 size_t NamesStore::GetNamesNum() const
 {
-	return GlobalNames->Num();
+	return GlobalNames->NumElements;
 }
 
 bool NamesStore::IsValid(size_t id) const
 {
-	return GlobalNames->IsValidIndex(static_cast<int32_t>(id));
+	return GlobalNames->IsValidIndex(id);
 }
 
 std::string NamesStore::GetById(size_t id) const
 {
-	return GlobalNames->GetById(static_cast<int32_t>(id))->GetName();
+	return GlobalNames->GetById(id)->AnsiName;
 }

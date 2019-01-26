@@ -14,7 +14,7 @@ public:
 		};
 
 		virtualFunctionPattern["Class CoreUObject.Object"] = {
-			{ "\x45\x33\xC0\x48\x8D\x55\x10\x49\x8B", "xxxxxxxxx", 0x200, R"(	inline void ProcessEvent(class UFunction* function, void* parms)
+			{ "\x45\x33\xC0\x48\x8D\x55\x10", "xxxxxxx", 0x200, R"(	inline void ProcessEvent(class UFunction* function, void* parms)
 	{
 		return GetVFunction<void(*)(UObject*, class UFunction*, void*)>(this, %d)(this, function, parms);
 	})" }
@@ -87,7 +87,7 @@ public:
 		};
 
 		predefinedMethods["Class CoreUObject.Object"] = {
-			PredefinedMethod::Inline(R"(	static inline TArray<UObject*>& UObject::GetGlobalObjects()
+			PredefinedMethod::Inline(R"(	static inline FChunkedFixedUObjectArray& GetGlobalObjects()
 	{
 		return GObjects->ObjObjects;
 	})"),
@@ -132,7 +132,7 @@ public:
 	{
 		for (int i = 0; i < GetGlobalObjects().Num(); ++i)
 		{
-			auto object = GetGlobalObjects().GetByIndex(i);
+			auto object = GetGlobalObjects().GetByIndex(i).Object;
 
 			if (object == nullptr)
 			{
@@ -153,7 +153,7 @@ public:
 			PredefinedMethod::Inline(R"(	template<typename T>
 	static T* GetObjectCasted(std::size_t index)
 	{
-		return static_cast<T*>(GetGlobalObjects().GetByIndex(index));
+		return static_cast<T*>(GetGlobalObjects().GetByIndex(index).Object);
 	})"),
 			PredefinedMethod::Default("bool IsA(UClass* cmp) const", R"(bool UObject::IsA(UClass* cmp) const
 {
@@ -191,7 +191,7 @@ public:
 
 	std::string GetGameVersion() const override
 	{
-		return "7.0";
+		return "16.2";
 	}
 
 	std::string GetNamespaceName() const override
@@ -225,7 +225,7 @@ public:
 		Count = Max = 0;
 	};
 
-	inline size_t Num() const
+	inline int Num() const
 	{
 		return Count;
 	};
@@ -245,73 +245,69 @@ public:
 		return i < Num();
 	}
 
-	inline T& GetByIndex(size_t i)
-	{
-		return Data[i];
-	}
-
-	inline const T& GetByIndex(size_t i) const
-	{
-		return Data[i];
-	}
-
-	void Add(T InputData)
-	{
-		Data = (T*)realloc(Data, sizeof(T) * (Count + 1));
-		Data[Count++] = InputData;
-		Max = Count;
-	};
-
-	void Clear()
-	{
-		free(Data);
-		Count = Max = 0;
-	};
-
 private:
 	T* Data;
-	int32_t Count;
-	int32_t Max;
+	int Count;
+	int Max;
 };
 
 class UObject;
 
+class FUObjectItem
+{
+public:
+	UObject* Object;
+	int SerialNumber;
+};
+
+class FChunkedFixedUObjectArray
+{
+public:
+	inline int Num() const
+	{
+		return NumElements;
+	}
+
+	enum
+	{
+		NumElementsPerChunk = 64 * 1024,
+	};
+
+	inline FUObjectItem const* GetObjectPtr(int Index) const
+	{
+		auto ChunkIndex = Index / NumElementsPerChunk;
+		auto WithinChunkIndex = Index % NumElementsPerChunk;
+		auto Chunk = Objects[ChunkIndex];
+		return Chunk + WithinChunkIndex;
+	}
+
+	inline FUObjectItem const& GetByIndex(int Index) const
+	{
+		return *GetObjectPtr(Index);
+	}
+
+private:
+	FUObjectItem** Objects;
+	FUObjectItem* PreAllocatedObjects;
+	int MaxElements;
+	int NumElements;
+	int MaxChunks;
+	int NumChunks;
+};
+
 class FUObjectArray
 {
 public:
-	int32_t ObjFirstGCIndex;
-	int32_t ObjLastNonGCIndex;
-	int32_t OpenForDisregardForGC;
-	TArray<UObject*> ObjObjects;
-	TArray<int32_t> ObjAvailable;
+	int ObjFirstGCIndex;
+	int ObjLastNonGCIndex;
+	int MaxObjectsNotConsideredByGC;
+	bool OpenForDisregardForGC;
+	FChunkedFixedUObjectArray ObjObjects;
 };
 
 class FNameEntry
 {
 public:
-	static const auto NAME_WIDE_MASK = 0x1;
-	static const auto NAME_INDEX_SHIFT = 1;
-
-	int32_t Index;
-	int32_t Flags;
-	FNameEntry* HashNext;
-
-	union
-	{
-		char AnsiName[1024];
-		wchar_t WideName[1024];
-	};
-
-	inline const int32_t GetIndex() const
-	{
-		return Index >> NAME_INDEX_SHIFT;
-	}
-
-	inline bool IsWide() const
-	{
-		return Index & NAME_WIDE_MASK;
-	}
-
 	inline const char* GetAnsiName() const
 	{
 		return AnsiName;
@@ -321,29 +317,43 @@ public:
 	{
 		return WideName;
 	}
+
+private:
+	int Index;
+	FNameEntry* HashNext;
+
+	union
+	{
+		char AnsiName[1024];
+		wchar_t WideName[1024];
+	};
 };
 
-template<typename ElementType, int32_t MaxTotalElements, int32_t ElementsPerChunk>
-class TStaticIndirectArrayThreadSafeRead
+class TNameEntryArray
 {
 public:
-	inline size_t Num() const
+	inline int Num() const
 	{
 		return NumElements;
 	}
 
-	inline bool IsValidIndex(int32_t index) const
+	inline bool IsValidIndex(int Index) const
 	{
-		return index < Num() && index >= 0;
+		return Index < Num() && Index >= 0;
 	}
 
-	inline ElementType const* const& operator[](int32_t index) const
+	inline FNameEntry const* const& operator[](int Index) const
 	{
-		return *GetItemPtr(index);
+		return *GetItemPtr(Index);
 	}
 
 private:
-	inline ElementType const* const* GetItemPtr(int32_t Index) const
+	enum {
+		ElementsPerChunk = 16 * 1024,
+		ChunkTableSize = (2 * 1024 * 1024 + ElementsPerChunk - 1) / ElementsPerChunk
+	};
+
+	inline FNameEntry const* const* GetItemPtr(int Index) const
 	{
 		const auto ChunkIndex = Index / ElementsPerChunk;
 		const auto WithinChunkIndex = Index % ElementsPerChunk;
@@ -351,22 +361,15 @@ private:
 		return Chunk + WithinChunkIndex;
 	}
 
-	enum
-	{
-		ChunkTableSize = (MaxTotalElements + ElementsPerChunk - 1) / ElementsPerChunk
-	};
-
-	ElementType** Chunks[ChunkTableSize];
-	int32_t NumElements;
-	int32_t NumChunks;
+	FNameEntry** Chunks[ChunkTableSize];
+	int NumElements;
+	int NumChunks;
 };
-
-using TNameEntryArray = TStaticIndirectArrayThreadSafeRead<FNameEntry, 2 * 1024 * 1024, 16384>;
 
 struct FName
 {
-	int32_t ComparisonIndex;
-	int32_t Number;
+	int ComparisonIndex;
+	int Number;
 
 	inline FName()
 		: ComparisonIndex(0),
@@ -374,7 +377,7 @@ struct FName
 	{
 	};
 
-	inline FName(int32_t i)
+	inline FName(int i)
 		: ComparisonIndex(i),
 		  Number(0)
 	{
@@ -693,34 +696,7 @@ class TLazyObjectPtr : FLazyObjectPtr
 	std::string GetBasicDefinitions() const override
 	{
 		return R"(TNameEntryArray* FName::GNames = nullptr;
-FUObjectArray* UObject::GObjects = nullptr;
-//---------------------------------------------------------------------------
-bool FWeakObjectPtr::IsValid() const
-{
-	if (ObjectSerialNumber == 0)
-	{
-		return false;
-	}
-	if (ObjectIndex < 0)
-	{
-		return false;
-	}
-	if (!UObject::GetGlobalObjects().IsValidIndex(ObjectIndex))
-	{
-		return false;
-	}
-	return UObject::GetGlobalObjects()[ObjectIndex] != nullptr;
-}
-//---------------------------------------------------------------------------
-UObject* FWeakObjectPtr::Get() const
-{
-	if (IsValid())
-	{
-		return UObject::GetGlobalObjects()[ObjectIndex];
-	}
-	return nullptr;
-}
-//---------------------------------------------------------------------------)";
+FUObjectArray* UObject::GObjects = nullptr;)";
 	}
 };
 
